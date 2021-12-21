@@ -1,1 +1,1 @@
-# phobert-sum
+# Vietnamese Summarization with PhoBERT
