@@ -4,3 +4,4 @@ transformers==2.10.0
 newspaper3k==0.2.8
 nltk==3.5
 vncorenlp==1.0.3
+pytorch_lightning=1.5.7
