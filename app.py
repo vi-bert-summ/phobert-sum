@@ -1,100 +1,98 @@
-import streamlit as st
 import os
-import torch
+import numpy as np
 import nltk
+import torch
 import urllib.request
-from models.ext_bert_summ_pylight import ExtBertSummPylight
+import streamlit as st
+
+import utils
+
 from newspaper import Article
+import os
+import time
+import glob
+import datasets
+import pandas as pd
+import transformers
+import concurrent.futures
+from typing import Optional
+
+import utils
+import parameters
+
+# from datasets import *
 from vncorenlp import VnCoreNLP
-import json
-from ext_sum import summarize as ext_summarize
+from transformers import EncoderDecoderModel
+from transformers import AutoTokenizer
+
+
+args = parameters.get_args()
 
 
 def main():
-    st.markdown("<h1 style='text-align: center;'>Tóm tắt văn bản Tiếng Việt</h1>", unsafe_allow_html=True)
+    start = time.time()
+    bg_img = '''
+    <style>
+    body {
+    background: url("https://img1.picmix.com/output/stamp/normal/3/7/8/5/1395873_5d4a6.gif"),
+                url("https://img1.picmix.com/output/stamp/normal/3/7/8/5/1395873_5d4a6.gif");
+    background-repeat: no-repeat no-repeat;
+    background-position: 0% -40%, 100% -40%
+    }
+    </style>
+    '''
+
+    st.markdown(bg_img, unsafe_allow_html=True)
+    # st.markdown(bg_img_right, unsafe_allow_html=True)
+    
+    st.markdown("<h1 style='text-align: center;'>Tóm Tắt Văn Bản Tiếng Việt</h1>", unsafe_allow_html=True)
 
     # Download model
-    if not os.path.exists('checkpoints/phobert_ext.pt'):
-        download_model()
-        
+    if not os.path.exists('checkpoints/mobilebert_ext.pt'):
+        # download_model()
+        pass
+
     # Load model
-    model = load_model()
+    # model = load_model()
 
     # Input
-    input_type = st.radio("Input Type: ", ["URL", "Raw Text"])
-    st.markdown("<h3 style='text-align: center;'>Input</h3>", unsafe_allow_html=True)
-    
-    # Segmenter define
-    VNCORENLP_PATH = "VnCoreNLP-1.1.1\VnCoreNLP-1.1.1.jar"
-    segmenter = VnCoreNLP(VNCORENLP_PATH, annotators="wseg", max_heap_size='-Xmx500m') 
-    
+    input_type = st.radio("Định dạng đầu vào: ", ["URL", "Đoạn văn"])
+    st.markdown("<h3 style='text-align: center;'>Đầu vào</h3>", unsafe_allow_html=True)
+
     if input_type == "Raw Text":
-        with open("raw_data/input.txt", "r", encoding='utf-8') as f:
-            sample_text = f.read()
-        text = st.text_area("", sample_text, 200)
-        item = tokenize(text, segmenter)
-        
+        text = st.text_input("")
     else:
-        url = st.text_input("", "https://dantri.com.vn/suc-khoe/ha-noi-them-1704-ca-covid19-485-ca-cong-dong-20211221174836611.htm")
-        st.markdown(f"[*Read Original News*]({url})")
+        url = st.text_input("", "https://www.cnn.com/2020/05/29/tech/facebook-violence-trump/index.html")
+        st.markdown(f"[*Nguồn văn bản*]({url})")
         text = crawl_url(url)
-        item = tokenize(text, segmenter)
 
-    input_fp = "raw_data/input.json"
-    # with open(input_fp, 'w', encoding="utf-8") as file:
-    #     file.write(text)
-
-    with open(input_fp, 'w', encoding='utf-8') as fo:
-        json.dump(item, fo, indent=4, ensure_ascii=False)
-
+    text = text.replace('_', ' ')
     # Summarize
-    sum_type = st.radio("Mode: ", ["Extractive", "Abstractive"])
-    result_fp = 'results/summary.txt'
-    if sum_type == "Extractive":
-        summary = ext_summarize(input_fp, result_fp, model)
-    else:
-        summary = ""
-    st.markdown("<h3 style='text-align: center;'>Summary</h3>", unsafe_allow_html=True)
+    sum_level = st.radio("Kiểu tóm tắt: ", ["Trích rút", "Tóm lược"])
+    result = st.button('Tóm tắt')
+    summary = ''
+    time_consuming = ''
+    if result: 
+        rdrsegmenter = VnCoreNLP("./vncorenlp/VnCoreNLP-1.1.1.jar", annotators="wseg", max_heap_size='-Xmx2g') 
+
+        tokenizer = AutoTokenizer.from_pretrained("vinai/phobert-base", use_fast=False)
+        summary = utils.bertsum(text, tokenizer, rdrsegmenter, args.device, args.checkpoint)
+        time_consuming = int(time.time() - start)
+        time_consuming = str(time_consuming) + 's'
+
+    summary = summary.replace('_', ' ')
+    # max_length = 3 if sum_level == "Short" else 5
+    # result_fp = 'results/summary.txt'
+    # summary = summarize(input_fp, result_fp, model, max_length=max_length)
+    st.markdown("<h3 style='text-align: center;'>Nội dung gốc</h3>", unsafe_allow_html=True)
+    st.markdown(f"<p align='justify'>{text}</p>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center;'>Văn bản tóm tắt {}</h3>".format(time_consuming), unsafe_allow_html=True)
     st.markdown(f"<p align='justify'>{summary}</p>", unsafe_allow_html=True)
-
-
-def download_model():
-    nltk.download('popular')
-    url = 'https://docs.google.com/uc?export=download&id=1kjy_yDO7gAbzEWGi5CfwXfmfCNb__V0i' 
-    # These are handles to two visual elements to animate.
-    weights_warning, progress_bar = None, None
-    try:
-        weights_warning = st.warning("Downloading checkpoint...")
-        progress_bar = st.progress(0)
-        with open('checkpoints/phobert_ext.pt', 'wb') as output_file:
-            with urllib.request.urlopen(url) as response:
-                length = int(response.info()["Content-Length"])
-                counter = 0.0
-                MEGABYTES = 2.0 ** 20.0
-                while True:
-                    data = response.read(8192)
-                    if not data:
-                        break
-                    counter += len(data)
-                    output_file.write(data)
-
-                    # We perform animation by overwriting the elements.
-                    weights_warning.warning("Downloading checkpoint... (%6.2f/%6.2f MB)" %
-                        (counter / MEGABYTES, length / MEGABYTES))
-                    progress_bar.progress(min(counter / length, 1.0))
-
-    # Finally, we remove these visual elements by calling .empty().
-    finally:
-        if weights_warning is not None:
-            weights_warning.empty()
-        if progress_bar is not None:
-            progress_bar.empty()
-
 
 @st.cache(suppress_st_warning=True)
 def load_model():
-    # checkpoint = torch.load(f'checkpoints/{model_type}_ext.pt', map_location='cpu')
-    model = ExtBertSummPylight()
+    model = EncoderDecoderModel.from_pretrained(args.checkpoint)
+    model.to(args.device)
     return model
 
 
@@ -104,15 +102,8 @@ def crawl_url(url):
     article.parse()
     return article.text
 
-def tokenize(texts, segmenter):
-    texts = texts.split('\n\n')
-    tokenized_texts = []
-    for text in texts:
-        tokenized_texts.append(segmenter.tokenize(text)[0])
-    item = {}
-    item['src'] = tokenized_texts
-    return item
-        
+
 if __name__ == "__main__":
     main()
-    
+
+
